@@ -158,6 +158,22 @@ if [[ -f "$LOG_FILE" ]]; then
     fi
 fi
 
+# Check for orphaned workspace files (scripts not in repos or symlinks)
+ORPHANED_COUNT=0
+for file in "$HOME/.openclaw/workspace"/*.{sh,py}; do
+    if [[ -f "$file" ]] && [[ ! -L "$file" ]]; then
+        # It's a real file, not a symlink - check if it's tracked in a repo
+        BASENAME=$(basename "$file")
+        # Skip known temp/generated files
+        if [[ "$BASENAME" != "venv" ]] && [[ "$BASENAME" != "__pycache__" ]]; then
+            ORPHANED_COUNT=$((ORPHANED_COUNT + 1))
+        fi
+    fi
+done
+if [[ $ORPHANED_COUNT -gt 0 ]]; then
+    echo "    {\"severity\": \"low\", \"type\": \"orphaned_files\", \"message\": \"$ORPHANED_COUNT workspace scripts not tracked in repos (may need migration to workspace-tools)\"}," >> "$HEALTH_FILE"
+fi
+
 sed -i '' '$ s/,$//' "$HEALTH_FILE" 2>/dev/null || true
 echo "  ]" >> "$HEALTH_FILE"
 echo "}" >> "$HEALTH_FILE"
