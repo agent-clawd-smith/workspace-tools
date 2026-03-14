@@ -158,20 +158,24 @@ if [[ -f "$LOG_FILE" ]]; then
     fi
 fi
 
-# Check for orphaned workspace files (scripts not in repos or symlinks)
+# Check for orphaned files across entire ~/.openclaw (scripts not in repos or symlinks)
 ORPHANED_COUNT=0
-for file in "$HOME/.openclaw/workspace"/*.{sh,py}; do
+ORPHANED_LIST=""
+while IFS= read -r file; do
     if [[ -f "$file" ]] && [[ ! -L "$file" ]]; then
-        # It's a real file, not a symlink - check if it's tracked in a repo
-        BASENAME=$(basename "$file")
-        # Skip known temp/generated files
-        if [[ "$BASENAME" != "venv" ]] && [[ "$BASENAME" != "__pycache__" ]]; then
-            ORPHANED_COUNT=$((ORPHANED_COUNT + 1))
+        # It's a real file, not a symlink
+        RELPATH="${file#$HOME/.openclaw/}"
+        ORPHANED_COUNT=$((ORPHANED_COUNT + 1))
+        if [[ -z "$ORPHANED_LIST" ]]; then
+            ORPHANED_LIST="$RELPATH"
+        else
+            ORPHANED_LIST="$ORPHANED_LIST, $RELPATH"
         fi
     fi
-done
+done < <(find "$HOME/.openclaw" -type f \( -name "*.sh" -o -name "*.py" \) ! -path "*/__pycache__/*" ! -path "*/.git/*" ! -path "*/node_modules/*" ! -path "*/venv/*" 2>/dev/null)
+
 if [[ $ORPHANED_COUNT -gt 0 ]]; then
-    echo "    {\"severity\": \"low\", \"type\": \"orphaned_files\", \"message\": \"$ORPHANED_COUNT workspace scripts not tracked in repos (may need migration to workspace-tools)\"}," >> "$HEALTH_FILE"
+    echo "    {\"severity\": \"low\", \"type\": \"orphaned_files\", \"message\": \"$ORPHANED_COUNT scripts in ~/.openclaw not tracked in repos: $ORPHANED_LIST\"}," >> "$HEALTH_FILE"
 fi
 
 sed -i '' '$ s/,$//' "$HEALTH_FILE" 2>/dev/null || true
