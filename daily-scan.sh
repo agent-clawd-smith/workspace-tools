@@ -54,8 +54,8 @@ echo "  ]," >> "$STATE_FILE"
 
 # 5. Recent podcast outputs
 echo "  \"podcasts\": [" >> "$STATE_FILE"
-if [[ -d "$HOME/repos/llm-observability/podcasts" ]]; then
-    for script in "$HOME/repos/llm-observability/podcasts"/*.txt; do
+if [[ -d "$HOME/repos/podcast-generator/episodes" ]]; then
+    for script in "$HOME/repos/podcast-generator/episodes"/*.txt; do
         if [[ -f "$script" ]]; then
             FILENAME=$(basename "$script")
             SIZE=$(wc -l < "$script" | xargs)
