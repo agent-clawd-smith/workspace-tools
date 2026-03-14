@@ -178,6 +178,61 @@ if [[ $ORPHANED_COUNT -gt 0 ]]; then
     echo "    {\"severity\": \"low\", \"type\": \"orphaned_files\", \"message\": \"$ORPHANED_COUNT scripts in ~/.openclaw not tracked in repos: $ORPHANED_LIST\"}," >> "$HEALTH_FILE"
 fi
 
+# Check for recurring jobs not reflected in Agent Operations table
+AGENT_OPS_FILE="$OBS_DIR/agent-operations.json"
+MISSING_JOBS=""
+MISSING_COUNT=0
+
+if [[ -f "$AGENT_OPS_FILE" ]]; then
+    # Get all operation IDs from agent-operations.json
+    KNOWN_OPS=$(jq -r '.agent_operations[].id' "$AGENT_OPS_FILE" 2>/dev/null || echo "")
+    
+    # Check system LaunchDaemons (not just user LaunchAgents)
+    if [[ -d "/Library/LaunchDaemons" ]]; then
+        for plist in /Library/LaunchDaemons/*.plist; do
+            if [[ -f "$plist" ]]; then
+                LABEL=$(defaults read "$plist" Label 2>/dev/null || basename "$plist" .plist)
+                # Check if it's related to our operations (openclaw, clawd, agent)
+                if echo "$LABEL" | grep -qiE "(openclaw|clawd|agent)"; then
+                    OP_ID=$(echo "$LABEL" | tr '.' '-')
+                    if ! echo "$KNOWN_OPS" | grep -q "$OP_ID"; then
+                        MISSING_JOBS="$MISSING_JOBS LaunchDaemon:$LABEL,"
+                        MISSING_COUNT=$((MISSING_COUNT + 1))
+                    fi
+                fi
+            fi
+        done
+    fi
+    
+    # Check for 'at' scheduled jobs
+    AT_JOBS=$(atq 2>/dev/null | wc -l | xargs)
+    if [[ "$AT_JOBS" -gt 0 ]]; then
+        # 'at' jobs are used by send-later.sh - check if we're tracking that
+        if ! echo "$KNOWN_OPS" | grep -q "send-later"; then
+            MISSING_JOBS="$MISSING_JOBS at-queue:${AT_JOBS}-jobs,"
+            MISSING_COUNT=$((MISSING_COUNT + 1))
+        fi
+    fi
+    
+    # Check OpenClaw managed crons vs what's in the table
+    OPENCLAW_CRON_FILE="$HOME/.openclaw/cron/jobs.json"
+    if [[ -f "$OPENCLAW_CRON_FILE" ]]; then
+        OPENCLAW_CRON_COUNT=$(jq '.jobs | length' "$OPENCLAW_CRON_FILE" 2>/dev/null || echo 0)
+        # Count how many are in agent-operations with type="llm" and have cron-like IDs
+        TABLE_CRON_COUNT=$(echo "$KNOWN_OPS" | grep -cE "(daily-podcast|paper-trader|moltbook)" || echo 0)
+        if [[ $OPENCLAW_CRON_COUNT -gt $TABLE_CRON_COUNT ]]; then
+            DIFF=$((OPENCLAW_CRON_COUNT - TABLE_CRON_COUNT))
+            MISSING_JOBS="$MISSING_JOBS OpenClaw-crons:${DIFF}-unmapped,"
+            MISSING_COUNT=$((MISSING_COUNT + 1))
+        fi
+    fi
+    
+    if [[ $MISSING_COUNT -gt 0 ]]; then
+        MISSING_JOBS="${MISSING_JOBS%,}"  # Remove trailing comma
+        echo "    {\"severity\": \"medium\", \"type\": \"untracked_jobs\", \"message\": \"$MISSING_COUNT recurring jobs not in Agent Operations table: $MISSING_JOBS\"}," >> "$HEALTH_FILE"
+    fi
+fi
+
 sed -i '' '$ s/,$//' "$HEALTH_FILE" 2>/dev/null || true
 echo "  ]" >> "$HEALTH_FILE"
 echo "}" >> "$HEALTH_FILE"
