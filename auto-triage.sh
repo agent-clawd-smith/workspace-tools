@@ -109,4 +109,69 @@ Replaced with symlinks to maintain paths" 2>&1
     esac
 done
 
+# Process auto-triage suggestions (from health report)
+if [[ -f "$HEALTH_FILE" ]]; then
+    SUGGESTIONS=$(jq -r '.auto_triage_suggestions[]? | @json' "$HEALTH_FILE" 2>/dev/null)
+    
+    while IFS= read -r suggestion_json; do
+        if [[ -n "$suggestion_json" ]]; then
+            SUGGESTION_TYPE=$(echo "$suggestion_json" | jq -r '.type')
+            
+            case "$SUGGESTION_TYPE" in
+                stale_commits)
+                    # Auto-commit stale changes >3 days old
+                    REPO_NAME=$(echo "$suggestion_json" | jq -r '.repo')
+                    REPO_PATH="$HOME/repos/$REPO_NAME"
+                    AGE_DAYS=$(echo "$suggestion_json" | jq -r '.age_days')
+                    
+                    if [[ -d "$REPO_PATH/.git" ]]; then
+                        cd "$REPO_PATH"
+                        UNCOMMITTED=$(git status --porcelain | wc -l | xargs)
+                        if [[ $UNCOMMITTED -gt 0 ]]; then
+                            git add -A
+                            git commit -m "Auto-commit: stale changes from daily scan ($AGE_DAYS days old)" 2>&1
+                            imsg send --to "$ADAM_NUMBER" --text "Fixed: Auto-committed $UNCOMMITTED stale changes in $REPO_NAME ($AGE_DAYS days old) ✅ 🕶️"
+                        fi
+                    fi
+                    ;;
+                
+                unpushed_commits)
+                    # Auto-push unpushed commits
+                    REPO_NAME=$(echo "$suggestion_json" | jq -r '.repo')
+                    REPO_PATH="$HOME/repos/$REPO_NAME"
+                    COUNT=$(echo "$suggestion_json" | jq -r '.count')
+                    
+                    if [[ -d "$REPO_PATH/.git" ]]; then
+                        cd "$REPO_PATH"
+                        git push 2>&1
+                        imsg send --to "$ADAM_NUMBER" --text "Fixed: Auto-pushed $COUNT commits in $REPO_NAME to remote ✅ 🕶️"
+                    fi
+                    ;;
+                
+                failed_launchagent)
+                    # Auto-restart failed LaunchAgent
+                    LABEL=$(echo "$suggestion_json" | jq -r '.label')
+                    STATUS=$(echo "$suggestion_json" | jq -r '.status')
+                    
+                    # Restart the LaunchAgent
+                    launchctl kickstart -k "gui/$(id -u)/$LABEL" 2>&1
+                    sleep 2
+                    
+                    # Check if it's running now
+                    NEW_STATUS=$(launchctl list | grep "$LABEL" | awk '{print $2}')
+                    if [[ "$NEW_STATUS" == "0" ]] || [[ -z "$NEW_STATUS" ]]; then
+                        imsg send --to "$ADAM_NUMBER" --text "Fixed: Restarted failed LaunchAgent $LABEL (was status $STATUS) ✅ 🕶️"
+                    else
+                        imsg send --to "$ADAM_NUMBER" --text "⚠️ Tried to restart $LABEL but still showing status $NEW_STATUS"
+                    fi
+                    ;;
+                
+                large_log_files|disk_trending_high|future_capability)
+                    # Not implemented yet - skip
+                    ;;
+            esac
+        fi
+    done <<< "$SUGGESTIONS"
+fi
+
 echo "Triage complete: processed $ISSUE_COUNT issues"
