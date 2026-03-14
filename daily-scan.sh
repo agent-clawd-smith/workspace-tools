@@ -296,12 +296,13 @@ if [[ $DISK_USAGE -gt 70 ]]; then
     echo "    {\"type\": \"disk_trending_high\", \"current_percent\": $DISK_USAGE, \"suggestion\": \"Auto-cleanup: old logs (>30 days), podcast archives (>60 days), temp files\"}," >> "$HEALTH_FILE"
 fi
 
-# Check for LaunchAgents that failed to load (status != 0)
+# Check for LaunchAgents that failed to load (status != 0, but only if not running)
 launchctl list | grep -iE "(openclaw|clawd|agent)" | while read -r line; do
     PID=$(echo "$line" | awk '{print $1}')
     STATUS=$(echo "$line" | awk '{print $2}')
     LABEL=$(echo "$line" | awk '{print $3}')
-    if [[ "$STATUS" != "0" ]] && [[ "$STATUS" != "-" ]]; then
+    # Only flag if status is bad AND not running (PID is "-")
+    if [[ "$STATUS" != "0" ]] && [[ "$STATUS" != "-" ]] && [[ "$PID" == "-" ]]; then
         echo "    {\"type\": \"failed_launchagent\", \"label\": \"$LABEL\", \"status\": $STATUS, \"suggestion\": \"Auto-restart failed LaunchAgent (low risk)\"}," >> "$HEALTH_FILE"
     fi
 done
