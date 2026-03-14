@@ -221,10 +221,23 @@ if [[ -f "$AGENT_OPS_FILE" ]]; then
         RECURRING_CRONS=$(jq -r '.jobs[] | select(.schedule.kind == "every") | .name' "$OPENCLAW_CRON_FILE" 2>/dev/null || echo "")
         while IFS= read -r cron_name; do
             if [[ -n "$cron_name" ]]; then
-                # Convert name to ID format for matching
-                CRON_ID=$(echo "$cron_name" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
-                # Check if this recurring cron is in the operations table
-                if ! echo "$KNOWN_OPS" | grep -qiE "($cron_name|$CRON_ID)"; then
+                # Check if any part of the cron name appears in the operations table
+                # e.g., "agent-inbox" should match "ai-openclaw-check-inbox"
+                FOUND=false
+                # Try direct match, lowercase match, and substring match
+                if echo "$KNOWN_OPS" | grep -qiE "$cron_name"; then
+                    FOUND=true
+                else
+                    # Try matching key words from the name
+                    for word in $(echo "$cron_name" | tr '-' ' '); do
+                        if [[ ${#word} -gt 3 ]] && echo "$KNOWN_OPS" | grep -qi "$word"; then
+                            FOUND=true
+                            break
+                        fi
+                    done
+                fi
+                
+                if [[ "$FOUND" == "false" ]]; then
                     MISSING_JOBS="$MISSING_JOBS OpenClaw-cron:$cron_name,"
                     MISSING_COUNT=$((MISSING_COUNT + 1))
                 fi
