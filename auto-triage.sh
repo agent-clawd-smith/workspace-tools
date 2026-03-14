@@ -68,6 +68,44 @@ Reply with your decision"
                 fi
             fi
             ;;
+        
+        orphaned_files)
+            if [[ "$SEVERITY" == "low" ]]; then
+                # Low risk - migrate to workspace-tools repo autonomously
+                TOOLS_REPO="$HOME/repos/workspace-tools"
+                WORKSPACE="$HOME/.openclaw/workspace"
+                
+                # Find orphaned .sh and .py files
+                ORPHANED_FILES=$(find "$WORKSPACE" -maxdepth 1 -type f \( -name "*.sh" -o -name "*.py" \) 2>/dev/null)
+                
+                if [[ -n "$ORPHANED_FILES" ]]; then
+                    cd "$TOOLS_REPO"
+                    MIGRATED=0
+                    while IFS= read -r file; do
+                        FILENAME=$(basename "$file")
+                        # Copy to repo
+                        cp "$file" "$TOOLS_REPO/$FILENAME"
+                        # Replace with symlink
+                        rm "$file"
+                        ln -s "$TOOLS_REPO/$FILENAME" "$file"
+                        MIGRATED=$((MIGRATED + 1))
+                    done <<< "$ORPHANED_FILES"
+                    
+                    # Commit and push
+                    git add *.sh *.py 2>/dev/null || true
+                    git commit -m "Auto-migrate $MIGRATED orphaned workspace scripts
+
+Low-risk infrastructure fix: moved untracked scripts to repo
+Replaced with symlinks to maintain paths" 2>&1
+                    git push 2>&1
+                    
+                    imsg send --to "$ADAM_NUMBER" --text "Fixed: Migrated $MIGRATED orphaned workspace scripts to workspace-tools repo, replaced with symlinks ✅ 🕶️"
+                else
+                    # Already fixed or false positive
+                    imsg send --to "$ADAM_NUMBER" --text "ℹ️ Orphaned files alert but none found - may have been fixed already"
+                fi
+            fi
+            ;;
     esac
 done
 
