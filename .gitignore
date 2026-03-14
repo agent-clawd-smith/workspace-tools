@@ -1,0 +1,7 @@
+secrets.json
+.env
+credentials/
+family-contacts.json
+__pycache__/
+*.pyc
+.DS_Store
