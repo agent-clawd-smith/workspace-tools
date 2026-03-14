@@ -16,12 +16,9 @@ fi
 
 ISSUE_COUNT=$(jq '.issues | length' "$HEALTH_FILE")
 
-if [[ "$ISSUE_COUNT" -eq 0 ]]; then
-    echo "No issues detected, skipping triage"
-    exit 0
-fi
-
-# Process each issue
+# Process issues (if any)
+if [[ "$ISSUE_COUNT" -gt 0 ]]; then
+    # Process each issue
 for i in $(seq 0 $(($ISSUE_COUNT - 1))); do
     SEVERITY=$(jq -r ".issues[$i].severity" "$HEALTH_FILE")
     TYPE=$(jq -r ".issues[$i].type" "$HEALTH_FILE")
@@ -107,7 +104,8 @@ Replaced with symlinks to maintain paths" 2>&1
             fi
             ;;
     esac
-done
+    done
+fi
 
 # Process auto-triage suggestions (from health report)
 if [[ -f "$HEALTH_FILE" ]]; then
