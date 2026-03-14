@@ -252,6 +252,66 @@ if [[ -f "$AGENT_OPS_FILE" ]]; then
 fi
 
 sed -i '' '$ s/,$//' "$HEALTH_FILE" 2>/dev/null || true
+echo "  ]," >> "$HEALTH_FILE"
+
+# Suggest new auto-triage capabilities based on observed patterns
+echo "  \"auto_triage_suggestions\": [" >> "$HEALTH_FILE"
+
+# Check for repos with uncommitted changes >3 days old
+for repo in "$HOME/repos"/*; do
+    if [[ -d "$repo/.git" ]]; then
+        cd "$repo"
+        UNCOMMITTED=$(git status --porcelain 2>/dev/null | wc -l | xargs)
+        if [[ $UNCOMMITTED -gt 0 ]]; then
+            # Check if oldest uncommitted file is >3 days old
+            OLDEST_MODIFIED=$(git status --porcelain | awk '{print $2}' | xargs stat -f "%m" 2>/dev/null | sort -n | head -1)
+            if [[ -n "$OLDEST_MODIFIED" ]]; then
+                AGE_DAYS=$(( ($(date +%s) - $OLDEST_MODIFIED) / 86400 ))
+                if [[ $AGE_DAYS -gt 3 ]]; then
+                    echo "    {\"type\": \"stale_commits\", \"repo\": \"$(basename $repo)\", \"age_days\": $AGE_DAYS, \"suggestion\": \"Auto-commit stale changes >3 days with message: 'Auto-commit: stale changes from daily scan'\"}," >> "$HEALTH_FILE"
+                fi
+            fi
+        fi
+        
+        # Check for unpushed commits
+        UNPUSHED=$(git log @{u}.. --oneline 2>/dev/null | wc -l | xargs || echo "0")
+        if [[ $UNPUSHED -gt 0 ]]; then
+            echo "    {\"type\": \"unpushed_commits\", \"repo\": \"$(basename $repo)\", \"count\": $UNPUSHED, \"suggestion\": \"Auto-push commits to remote (low risk if already committed)\"}," >> "$HEALTH_FILE"
+        fi
+    fi
+done
+
+# Check for large log files (>10MB)
+for logfile in "$HOME/repos/llm-observability"/*.log "$HOME/.openclaw/workspace"/*.log; do
+    if [[ -f "$logfile" ]]; then
+        SIZE_MB=$(( $(stat -f "%z" "$logfile" 2>/dev/null || echo 0) / 1048576 ))
+        if [[ $SIZE_MB -gt 10 ]]; then
+            echo "    {\"type\": \"large_log_files\", \"file\": \"$(basename $logfile)\", \"size_mb\": $SIZE_MB, \"suggestion\": \"Auto-rotate/compress logs >10MB\"}," >> "$HEALTH_FILE"
+        fi
+    fi
+done
+
+# Check for disk usage trending (if >70%, suggest proactive cleanup)
+if [[ $DISK_USAGE -gt 70 ]]; then
+    echo "    {\"type\": \"disk_trending_high\", \"current_percent\": $DISK_USAGE, \"suggestion\": \"Auto-cleanup: old logs (>30 days), podcast archives (>60 days), temp files\"}," >> "$HEALTH_FILE"
+fi
+
+# Check for LaunchAgents that failed to load (status != 0)
+launchctl list | grep -iE "(openclaw|clawd|agent)" | while read -r line; do
+    PID=$(echo "$line" | awk '{print $1}')
+    STATUS=$(echo "$line" | awk '{print $2}')
+    LABEL=$(echo "$line" | awk '{print $3}')
+    if [[ "$STATUS" != "0" ]] && [[ "$STATUS" != "-" ]]; then
+        echo "    {\"type\": \"failed_launchagent\", \"label\": \"$LABEL\", \"status\": $STATUS, \"suggestion\": \"Auto-restart failed LaunchAgent (low risk)\"}," >> "$HEALTH_FILE"
+    fi
+done
+
+# Check for recurring cron job failures (exit code tracking would require log parsing - future enhancement)
+# Placeholder for now
+echo "    {\"type\": \"future_capability\", \"suggestion\": \"Track cron job exit codes → auto-restart failed jobs\"}," >> "$HEALTH_FILE"
+echo "    {\"type\": \"future_capability\", \"suggestion\": \"Monitor service resource usage → auto-restart memory leaks\"}," >> "$HEALTH_FILE"
+echo "    {\"type\": \"future_capability\", \"suggestion\": \"Detect config drift → auto-restore from known-good state\"}" >> "$HEALTH_FILE"
+
 echo "  ]" >> "$HEALTH_FILE"
 echo "}" >> "$HEALTH_FILE"
 
