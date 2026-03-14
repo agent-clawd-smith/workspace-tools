@@ -173,3 +173,7 @@ if [[ -f "$HEALTH_FILE" ]]; then
 fi
 
 echo "Triage complete: processed $ISSUE_COUNT issues"
+
+# Re-run the daily scan to update health report (clears fixed suggestions)
+echo "Re-running scan to update health status..."
+"$HOME/.openclaw/workspace/daily-scan.sh" >/dev/null 2>&1
