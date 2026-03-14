@@ -147,20 +147,27 @@ if [[ -f "$HEALTH_FILE" ]]; then
                     ;;
                 
                 failed_launchagent)
-                    # Auto-restart failed LaunchAgent
+                    # Auto-restart failed LaunchAgent (only if actually NOT running)
                     LABEL=$(echo "$suggestion_json" | jq -r '.label')
                     STATUS=$(echo "$suggestion_json" | jq -r '.status')
                     
-                    # Restart the LaunchAgent
+                    # Check if it's actually running (has a valid PID)
+                    CURRENT_PID=$(launchctl list | grep "$LABEL" | awk '{print $1}')
+                    if [[ "$CURRENT_PID" != "-" ]] && [[ -n "$CURRENT_PID" ]]; then
+                        # Service is running (has PID) - sticky error status is harmless, skip
+                        continue
+                    fi
+                    
+                    # Service is NOT running - restart it
                     launchctl kickstart -k "gui/$(id -u)/$LABEL" 2>&1
                     sleep 2
                     
                     # Check if it's running now
-                    NEW_STATUS=$(launchctl list | grep "$LABEL" | awk '{print $2}')
-                    if [[ "$NEW_STATUS" == "0" ]] || [[ -z "$NEW_STATUS" ]]; then
-                        imsg send --to "$ADAM_NUMBER" --text "Fixed: Restarted failed LaunchAgent $LABEL (was status $STATUS) ✅ 🕶️"
+                    NEW_PID=$(launchctl list | grep "$LABEL" | awk '{print $1}')
+                    if [[ "$NEW_PID" != "-" ]] && [[ -n "$NEW_PID" ]]; then
+                        imsg send --to "$ADAM_NUMBER" --text "Fixed: Restarted failed LaunchAgent $LABEL (now running with PID $NEW_PID) ✅ 🕶️"
                     else
-                        imsg send --to "$ADAM_NUMBER" --text "⚠️ Tried to restart $LABEL but still showing status $NEW_STATUS"
+                        imsg send --to "$ADAM_NUMBER" --text "⚠️ Tried to restart $LABEL but it's still not running"
                     fi
                     ;;
                 
