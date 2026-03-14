@@ -214,17 +214,22 @@ if [[ -f "$AGENT_OPS_FILE" ]]; then
         fi
     fi
     
-    # Check OpenClaw managed crons vs what's in the table
+    # Check OpenClaw managed crons for recurring operations (exclude one-time reminders)
     OPENCLAW_CRON_FILE="$HOME/.openclaw/cron/jobs.json"
     if [[ -f "$OPENCLAW_CRON_FILE" ]]; then
-        OPENCLAW_CRON_COUNT=$(jq '.jobs | length' "$OPENCLAW_CRON_FILE" 2>/dev/null || echo 0)
-        # Count how many are in agent-operations with type="llm" and have cron-like IDs
-        TABLE_CRON_COUNT=$(echo "$KNOWN_OPS" | grep -cE "(daily-podcast|paper-trader|moltbook)" || echo 0)
-        if [[ $OPENCLAW_CRON_COUNT -gt $TABLE_CRON_COUNT ]]; then
-            DIFF=$((OPENCLAW_CRON_COUNT - TABLE_CRON_COUNT))
-            MISSING_JOBS="$MISSING_JOBS OpenClaw-crons:${DIFF}-unmapped,"
-            MISSING_COUNT=$((MISSING_COUNT + 1))
-        fi
+        # Get cron jobs that are recurring (have "every" in schedule)
+        RECURRING_CRONS=$(jq -r '.jobs[] | select(.schedule.kind == "every") | .name' "$OPENCLAW_CRON_FILE" 2>/dev/null || echo "")
+        while IFS= read -r cron_name; do
+            if [[ -n "$cron_name" ]]; then
+                # Convert name to ID format for matching
+                CRON_ID=$(echo "$cron_name" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+                # Check if this recurring cron is in the operations table
+                if ! echo "$KNOWN_OPS" | grep -qiE "($cron_name|$CRON_ID)"; then
+                    MISSING_JOBS="$MISSING_JOBS OpenClaw-cron:$cron_name,"
+                    MISSING_COUNT=$((MISSING_COUNT + 1))
+                fi
+            fi
+        done <<< "$RECURRING_CRONS"
     fi
     
     if [[ $MISSING_COUNT -gt 0 ]]; then
