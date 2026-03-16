@@ -33,7 +33,7 @@ echo "  ]," >> "$STATE_FILE"
 
 # 3. OpenClaw managed crons (via openclaw cron list)
 echo "  \"openclaw_crons\": [" >> "$STATE_FILE"
-openclaw cron list --json 2>/dev/null | jq -c '.[]' | awk '{print "    " $0 ","}' | sed '$ s/,$//' >> "$STATE_FILE" || echo "" >> "$STATE_FILE"
+openclaw cron list --json 2>/dev/null | jq -c '.jobs[]' | awk '{print "    " $0 ","}' | sed '$ s/,$//' >> "$STATE_FILE" || echo "" >> "$STATE_FILE"
 echo "  ]," >> "$STATE_FILE"
 
 # 4. Git repos status
@@ -156,6 +156,19 @@ if [[ -f "$LOG_FILE" ]]; then
     if [[ $LOG_AGE -gt 1800 ]]; then
         echo "    {\"severity\": \"medium\", \"type\": \"imessage\", \"message\": \"iMessage processor log hasn't updated in $(($LOG_AGE / 60))m\"}," >> "$HEALTH_FILE"
     fi
+fi
+
+# Check for failed openclaw cron jobs
+FAILED_CRONS=$(openclaw cron list --json 2>/dev/null | jq -c '.jobs[] | select(.state.lastRunStatus == "error") | {id, name, error: .state.lastError, consecutive: .state.consecutiveErrors}' 2>/dev/null)
+if [[ -n "$FAILED_CRONS" ]]; then
+    while IFS= read -r failed_job; do
+        JOB_NAME=$(echo "$failed_job" | jq -r '.name')
+        CONSECUTIVE=$(echo "$failed_job" | jq -r '.consecutive')
+        ERROR_MSG=$(echo "$failed_job" | jq -r '.error' | head -c 100)
+        SEVERITY="medium"
+        [[ $CONSECUTIVE -gt 3 ]] && SEVERITY="high"
+        echo "    {\"severity\": \"$SEVERITY\", \"type\": \"openclaw_cron\", \"job\": \"$JOB_NAME\", \"consecutive_errors\": $CONSECUTIVE, \"message\": \"$ERROR_MSG\"}," >> "$HEALTH_FILE"
+    done <<< "$FAILED_CRONS"
 fi
 
 # Check for orphaned files across entire ~/.openclaw (scripts not in repos or symlinks)

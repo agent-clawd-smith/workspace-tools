@@ -66,6 +66,25 @@ Reply with your decision"
             fi
             ;;
         
+        openclaw_cron)
+            JOB_NAME=$(jq -r ".issues[$i].job" "$HEALTH_FILE")
+            CONSECUTIVE=$(jq -r ".issues[$i].consecutive_errors" "$HEALTH_FILE")
+            ERROR_MSG=$(jq -r ".issues[$i].message" "$HEALTH_FILE")
+            
+            if [[ "$SEVERITY" == "high" ]] || [[ $CONSECUTIVE -gt 3 ]]; then
+                # High risk or multiple failures - alert Adam with details
+                imsg send --to "$ADAM_NUMBER" --text "🚨 **OpenClaw Cron Failure**
+Job: $JOB_NAME
+Consecutive failures: $CONSECUTIVE
+Error: $ERROR_MSG
+
+Check logs: openclaw cron logs --id <id>"
+            elif [[ "$SEVERITY" == "medium" ]]; then
+                # Medium risk - notify but don't block
+                imsg send --to "$ADAM_NUMBER" --text "⚠️ Cron job '$JOB_NAME' failed with: $ERROR_MSG ($CONSECUTIVE consecutive)"
+            fi
+            ;;
+        
         orphaned_files)
             if [[ "$SEVERITY" == "low" ]]; then
                 # Low risk - migrate to workspace-tools repo autonomously
