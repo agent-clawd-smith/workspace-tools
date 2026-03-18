@@ -330,3 +330,8 @@ echo "  ]" >> "$HEALTH_FILE"
 echo "}" >> "$HEALTH_FILE"
 
 echo "Daily scan complete: $STATE_FILE, $HEALTH_FILE"
+
+# Generate strategic recommendations (ClawHub + podcast + system insights)
+if [[ -f "$OBS_DIR/generate-recommendations.py" ]]; then
+    python3 "$OBS_DIR/generate-recommendations.py" 2>&1 | tee -a "$OBS_DIR/daily-scan.log"
+fi
