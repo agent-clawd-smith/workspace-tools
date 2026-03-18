@@ -286,6 +286,13 @@ for repo in "$HOME/repos"/*; do
             fi
         fi
         
+        # Check for uncommitted changes (any age)
+        UNCOMMITTED=$(git status --porcelain 2>/dev/null | wc -l | xargs)
+        if [[ $UNCOMMITTED -gt 0 ]] && [[ $UNCOMMITTED -gt 5 ]]; then
+            # Only flag if >5 files (avoid noise from small edits)
+            echo "    {\"type\": \"uncommitted_changes\", \"repo\": \"$(basename $repo)\", \"count\": $UNCOMMITTED, \"suggestion\": \"Review and commit changes to track work progress\", \"severity\": \"medium\"}," >> "$HEALTH_FILE"
+        fi
+        
         # Check for unpushed commits
         UNPUSHED=$(git log @{u}.. --oneline 2>/dev/null | wc -l | xargs || echo "0")
         if [[ $UNPUSHED -gt 0 ]]; then
