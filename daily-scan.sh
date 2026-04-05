@@ -150,6 +150,20 @@ if [[ -f "$HOME/repos/llm-observability/trading-summary.json" ]]; then
     fi
 fi
 
+# Check if recommendations generation is stale (should run daily at 3 AM)
+if [[ -f "$OBS_DIR/recommendations-state.json" ]]; then
+    RECS_LAST_GEN=$(jq -r '.last_generated' "$OBS_DIR/recommendations-state.json" 2>/dev/null || echo "")
+    if [[ -n "$RECS_LAST_GEN" ]]; then
+        # Convert ISO timestamp to epoch
+        RECS_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$(echo $RECS_LAST_GEN | cut -d'+' -f1 | cut -d'.' -f1)" "+%s" 2>/dev/null || echo "0")
+        RECS_AGE=$(( $(date +%s) - $RECS_EPOCH ))
+        # If recommendations haven't been generated in >30 hours (missing a daily run), flag it
+        if [[ $RECS_AGE -gt 108000 ]]; then
+            echo "    {\"severity\": \"high\", \"type\": \"recommendations\", \"message\": \"Recommendations haven't been generated in $(($RECS_AGE / 3600))h (should run daily at 3 AM)\"}," >> "$HEALTH_FILE"
+        fi
+    fi
+fi
+
 # Check if iMessage processor ran in last 30 minutes
 if [[ -f "$LOG_FILE" ]]; then
     LOG_AGE=$(( $(date +%s) - $(stat -f "%m" "$LOG_FILE") ))
