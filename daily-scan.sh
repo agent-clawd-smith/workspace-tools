@@ -171,6 +171,74 @@ if [[ -n "$FAILED_CRONS" ]]; then
     done <<< "$FAILED_CRONS"
 fi
 
+# Validate critical cron script syntax (check for common errors)
+CRON_SCRIPT_ERRORS=""
+CRON_SCRIPT_ERROR_COUNT=0
+
+# List of critical cron scripts to validate
+CRITICAL_SCRIPTS=(
+    "$OBS_DIR/weekly-digest.py"
+    "$OBS_DIR/budget-monitor.py"
+    "$OBS_DIR/extract-session-usage.py"
+    "$OBS_DIR/moltbook-cron.py"
+    "$HOME/repos/podcast-generator/podcast-generate.py"
+    "$HOME/repos/podcast-generator/memory-daily.py"
+    "$HOME/repos/podcast-generator/memory-weekly.py"
+    "$HOME/repos/polymarket-paper-trader/cli.py"
+    "$WORKSPACE/auto-triage.sh"
+    "$WORKSPACE/health-monitor.sh"
+)
+
+for script in "${CRITICAL_SCRIPTS[@]}"; do
+    if [[ -f "$script" ]]; then
+        SCRIPT_NAME=$(basename "$script")
+        
+        # Python scripts: check for 'openclaw run' (doesn't exist)
+        if [[ "$script" == *.py ]]; then
+            if grep -q "openclaw.*run" "$script" 2>/dev/null; then
+                CRON_SCRIPT_ERRORS="$CRON_SCRIPT_ERRORS $SCRIPT_NAME:invalid_openclaw_command,"
+                CRON_SCRIPT_ERROR_COUNT=$((CRON_SCRIPT_ERROR_COUNT + 1))
+            fi
+            
+            # Check for unclosed f-strings (basic check for triple quotes)
+            if python3 -m py_compile "$script" 2>&1 | grep -qiE "(SyntaxError|EOFError)"; then
+                COMPILE_ERROR=$(python3 -m py_compile "$script" 2>&1 | head -1)
+                CRON_SCRIPT_ERRORS="$CRON_SCRIPT_ERRORS $SCRIPT_NAME:syntax_error(${COMPILE_ERROR:0:50}),"
+                CRON_SCRIPT_ERROR_COUNT=$((CRON_SCRIPT_ERROR_COUNT + 1))
+            fi
+        fi
+        
+        # Bash scripts: check for common errors
+        if [[ "$script" == *.sh ]]; then
+            # Basic syntax check with bash -n
+            if ! bash -n "$script" 2>/dev/null; then
+                BASH_ERROR=$(bash -n "$script" 2>&1 | head -1)
+                CRON_SCRIPT_ERRORS="$CRON_SCRIPT_ERRORS $SCRIPT_NAME:bash_syntax_error(${BASH_ERROR:0:50}),"
+                CRON_SCRIPT_ERROR_COUNT=$((CRON_SCRIPT_ERROR_COUNT + 1))
+            fi
+        fi
+        
+        # Check if script has execute permissions
+        if [[ ! -x "$script" ]]; then
+            CRON_SCRIPT_ERRORS="$CRON_SCRIPT_ERRORS $SCRIPT_NAME:not_executable,"
+            CRON_SCRIPT_ERROR_COUNT=$((CRON_SCRIPT_ERROR_COUNT + 1))
+        fi
+        
+        # Check for hardcoded paths that assume interactive shell PATH
+        if grep -qE 'subprocess\.run\(\[["'"'"']node["'"'"']|subprocess\.run\(\[["'"'"']openclaw["'"'"']' "$script" 2>/dev/null; then
+            if ! grep -qE '(/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/)' "$script" 2>/dev/null; then
+                CRON_SCRIPT_ERRORS="$CRON_SCRIPT_ERRORS $SCRIPT_NAME:missing_full_path_for_commands,"
+                CRON_SCRIPT_ERROR_COUNT=$((CRON_SCRIPT_ERROR_COUNT + 1))
+            fi
+        fi
+    fi
+done
+
+if [[ $CRON_SCRIPT_ERROR_COUNT -gt 0 ]]; then
+    CRON_SCRIPT_ERRORS="${CRON_SCRIPT_ERRORS%,}"  # Remove trailing comma
+    echo "    {\"severity\": \"high\", \"type\": \"cron_script_validation\", \"message\": \"$CRON_SCRIPT_ERROR_COUNT critical cron scripts have syntax/config errors: $CRON_SCRIPT_ERRORS\"}," >> "$HEALTH_FILE"
+fi
+
 # Check for orphaned files across entire ~/.openclaw (scripts not in repos or symlinks)
 ORPHANED_COUNT=0
 ORPHANED_LIST=""
